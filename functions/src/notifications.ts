@@ -8,8 +8,10 @@ export const sendGeneralNotification = functions.firestore
     const timestamp = context.params.timestamp;
     const message = snapshot.data();
 
-    if (!message) return null;
-    console.log('New message added at ', timestamp, ' with payload ', message);
+    if (!message) return;
+
+    console.log(`New message added at ${timestamp} with payload ${message}`);
+
     const deviceTokensPromise = firestore().collection('notificationsSubscribers').get();
     const notificationsConfigPromise = firestore().collection('config').doc('notifications').get();
 
@@ -25,14 +27,17 @@ export const sendGeneralNotification = functions.firestore
 
     if (!tokens.length) {
       console.log('There are no notification tokens to send to.');
-      return null;
+      return;
     }
-    console.log('There are', tokens.length, 'tokens to send notifications to.');
+    console.log(`There are ${tokens.length} tokens to send notifications to.`);
 
     const payload = {
-      data: Object.assign({}, message, {
-        icon: message.icon || notificationsConfig.icon,
-      }),
+      data: {
+        ...message,
+        ...{
+          icon: message.icon || notificationsConfig.icon,
+        },
+      },
     };
 
     const tokensToRemove = [];
@@ -40,7 +45,7 @@ export const sendGeneralNotification = functions.firestore
     messagingResponse.results.forEach((result, index) => {
       const error = result.error;
       if (error) {
-        console.error('Failure sending notification to', tokens[index], error);
+        console.error(`Failure sending notification to ${tokens[index]}`, error);
         if (
           error.code === 'messaging/invalid-registration-token' ||
           error.code === 'messaging/registration-token-not-registered'
@@ -50,5 +55,6 @@ export const sendGeneralNotification = functions.firestore
         }
       }
     });
+
     return Promise.all(tokensToRemove);
   });

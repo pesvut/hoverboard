@@ -1,65 +1,58 @@
 import { Dispatch } from 'redux';
+import { RootState, store } from '..';
 import { db } from '../db';
-import { trackError } from '../helpers/actions';
 import { setLocation } from '../routing/actions';
 import { showToast } from '../toast/actions';
 import { NOTIFICATIONS_STATUS, UPDATE_NOTIFICATIONS_STATUS } from './types';
 
-// TODO: Refactor this file
+const messaging = window.firebase.messaging();
 
-let messaging: firebase.messaging.Messaging;
+console.log('Notification.permission', Notification.permission);
 
-export const initializeMessaging = () => {
-  return new Promise((resolve) => {
-    messaging = window.firebase.messaging();
-    messaging.onMessage(({ notification }) => {
-      showToast({
-        message: `${notification.title} ${notification.body}`,
-        action: {
-          title: '{$ notifications.toast.title $}',
-          callback: () => {
-            setLocation(notification.click_action);
-          },
+const isGranted = () => Notification.permission === NOTIFICATIONS_STATUS.GRANTED;
+
+export const initializeMessaging = async () => {
+  messaging.onMessage(({ notification }) => {
+    showToast({
+      message: `${notification.title} ${notification.body}`,
+      action: {
+        title: '{$ notifications.toast.title $}',
+        callback: () => {
+          setLocation(notification.click_action);
         },
-      });
+      },
     });
-    messaging.onTokenRefresh(() => {
-      getToken(true);
-    });
-    resolve(messaging);
   });
+  messaging.onTokenRefresh(() => getToken(true));
 };
 
-export const requestPermission = () => (dispatch: Dispatch) => {
-  return messaging
-    .requestPermission()
-    .then(() => {
-      getToken(true);
-    })
-    .catch((error) => {
+export const requestPermission = () => async (dispatch: Dispatch) => {
+  try {
+    await messaging.requestPermission();
+    store.dispatch(getToken(true));
+    } catch(error) {
       dispatch({
         type: UPDATE_NOTIFICATIONS_STATUS,
         status: NOTIFICATIONS_STATUS.DENIED,
       });
-
-      trackError('notificationActions', 'requestPermission', error);
-    });
+    }
 };
 
-export const getToken = (subscribe = false) => (dispatch: Dispatch, getState) => {
-  if (!subscribe && Notification.permission !== 'granted') {
+export const getToken = (subscribe = false) => (dispatch: Dispatch, getState):  => {
+  if (!subscribe && !isGranted()) {
+    console.log(`getToken: subscribe ${subscribe} isGranted ${isGranted()}`);
     return;
   }
   messaging
     .getToken()
     .then((currentToken) => {
       if (currentToken) {
-        const state = getState();
+        const state: RootState = getState();
 
         const subscribersRef = db().collection('notificationsSubscribers').doc(currentToken);
         const subscribersPromise = subscribersRef.get();
 
-        const userUid = state.user && (state.user.uid || null);
+        const userUid = 'uid' in state.user ? state.user.uid : null;
 
         let userSubscriptionsPromise = Promise.resolve(null);
         let userSubscriptionsRef;
@@ -128,17 +121,14 @@ export const getToken = (subscribe = false) => (dispatch: Dispatch, getState) =>
         status: NOTIFICATIONS_STATUS.DENIED,
         token: null,
       });
-
-      trackError('notificationActions', 'getToken', error);
     });
 };
 
-export const unsubscribe = (token) => (dispatch: Dispatch) => {
-  return messaging.deleteToken(token).then(() => {
-    dispatch({
-      type: UPDATE_NOTIFICATIONS_STATUS,
-      status: NOTIFICATIONS_STATUS.DEFAULT,
-      token: null,
-    });
+export const unsubscribe = (token: string) => async (dispatch: Dispatch) => {
+  await messaging.deleteToken(token)
+  dispatch({
+    type: UPDATE_NOTIFICATIONS_STATUS,
+    status: NOTIFICATIONS_STATUS.DEFAULT,
+    token: null,
   });
 };
